@@ -1,0 +1,97 @@
+# =====================================================
+# VAT Tax System v3.0.0 - Docker Compose
+# =====================================================
+
+version: '3.8'
+
+services:
+  # ===== PostgreSQL Database =====
+  postgres:
+    image: postgres:15-alpine
+    container_name: vat-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:-vat_tax_db}
+      POSTGRES_USER: ${DB_USER:-vat_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-VatSecure2026!}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database_schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    ports:
+      - "5432:5432"
+    networks:
+      - vat-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-vat_user} -d ${DB_NAME:-vat_tax_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ===== Main Application =====
+  vat-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: vat-app
+    restart: unless-stopped
+    environment:
+      # Database
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-vat_tax_db}
+      DB_USER: ${DB_USER:-vat_user}
+      DB_PASSWORD: ${DB_PASSWORD:-VatSecure2026!}
+      # Application
+      SECRET_KEY: ${SECRET_KEY:-vat-secret-key-2026-change-me}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-jwt-secret-key-2026}
+      APP_HOST: 0.0.0.0
+      APP_PORT: 5000
+      APP_DEBUG: ${APP_DEBUG:-False}
+      # Ollama AI
+      OLLAMA_URL: ${OLLAMA_URL:-http://192.168.1.225:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.2:latest}
+      OLLAMA_TIMEOUT: ${OLLAMA_TIMEOUT:-60}
+      # Storage
+      STORAGE_PATH: /app/storage
+    volumes:
+      - app_storage:/app/storage
+      - app_logs:/app/logs
+    ports:
+      - "5000:5000"
+    networks:
+      - vat-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # ===== Nginx Reverse Proxy =====
+  nginx:
+    image: nginx:alpine
+    container_name: vat-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      - vat-network
+    depends_on:
+      - vat-app
+
+# ===== Networks =====
+networks:
+  vat-network:
+    driver: bridge
+
+# ===== Volumes =====
+volumes:
+  postgres_data:
+  app_storage:
+  app_logs:
